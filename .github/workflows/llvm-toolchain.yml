@@ -19,8 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build LLVM toolchain and runtimes
+  build-linux:
+    name: Build LLVM toolchain and runtimes (Linux)
     runs-on: ubuntu-24.04
     timeout-minutes: 360
 
@@ -28,8 +28,7 @@ jobs:
       BUILD_ROOT: ${{ github.workspace }}/.ci
       LLVM_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv
       LLVM_RUNTIMES_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv-runtimes
-      PICOLIBC_BUILD_DIR: ${{ github.workspace }}/.ci/build-picolibc-riscv
-      PICOLIBC_SYSROOT: ${{ github.workspace }}/.ci/build-llvm-riscv/picolibc/riscv32-corev-elf
+      CLANG_RUNTIMES_ROOT: ${{ github.workspace }}/.ci/build-llvm-riscv/lib/clang-runtimes
       TMP: /tmp
 
     steps:
@@ -58,10 +57,76 @@ jobs:
 
       - name: Verify installed CORE-V multilibs
         run: |
+          test -f "${CLANG_RUNTIMES_ROOT}/multilib.yaml"
           make print-llvm-multilibs | while read -r multilib; do
-            test -f "${LLVM_BUILD_DIR}/lib/${multilib}/libc++.a"
-            test -f "${LLVM_BUILD_DIR}/lib/${multilib}/libc++abi.a"
-            test -f "${LLVM_BUILD_DIR}/lib/${multilib}/libunwind.a"
-            test -f "${LLVM_BUILD_DIR}/lib/${multilib}/libclang_rt.builtins.a"
-            test -f "${PICOLIBC_SYSROOT}/lib/${multilib}/libc.a"
+            libdir="${CLANG_RUNTIMES_ROOT}/riscv32-corev-elf/${multilib}/lib"
+            test -f "${libdir}/libc.a"
+            test -f "${libdir}/libc++.a"
+            test -f "${libdir}/libc++abi.a"
+            test -f "${libdir}/libunwind.a"
+            test -f "${libdir}/libclang_rt.builtins.a"
           done
+
+      - name: Package LLVM CORE-V toolchain
+        run: |
+          mkdir -p "${BUILD_ROOT}/artifacts"
+          tar -C "${BUILD_ROOT}" -czf "${BUILD_ROOT}/artifacts/llvm-corev-toolchain-linux.tar.gz" build-llvm-riscv
+
+      - name: Upload LLVM CORE-V toolchain
+        uses: actions/upload-artifact@v4
+        with:
+          name: llvm-corev-toolchain-linux
+          path: ${{ env.BUILD_ROOT }}/artifacts/llvm-corev-toolchain-linux.tar.gz
+          if-no-files-found: error
+
+  build-macos:
+    name: Build LLVM toolchain and runtimes (macOS)
+    runs-on: macos-14
+    timeout-minutes: 360
+
+    env:
+      BUILD_ROOT: ${{ github.workspace }}/.ci
+      LLVM_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv
+      LLVM_RUNTIMES_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv-runtimes
+      CLANG_RUNTIMES_ROOT: ${{ github.workspace }}/.ci/build-llvm-riscv/lib/clang-runtimes
+      TMP: /tmp
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          brew update
+          brew install cmake meson ninja ripgrep
+
+      - name: Build and sanity-check LLVM CORE-V toolchain
+        run: |
+          make ci-llvm-toolchain JOBS="$(sysctl -n hw.ncpu)"
+
+      - name: Verify installed CORE-V multilibs
+        run: |
+          test -f "${CLANG_RUNTIMES_ROOT}/multilib.yaml"
+          make print-llvm-multilibs | while read -r multilib; do
+            libdir="${CLANG_RUNTIMES_ROOT}/riscv32-corev-elf/${multilib}/lib"
+            test -f "${libdir}/libc.a"
+            test -f "${libdir}/libc++.a"
+            test -f "${libdir}/libc++abi.a"
+            test -f "${libdir}/libunwind.a"
+            test -f "${libdir}/libclang_rt.builtins.a"
+          done
+
+      - name: Package LLVM CORE-V toolchain
+        run: |
+          mkdir -p "${BUILD_ROOT}/artifacts"
+          tar -C "${BUILD_ROOT}" -czf "${BUILD_ROOT}/artifacts/llvm-corev-toolchain-macos.tar.gz" build-llvm-riscv
+
+      - name: Upload LLVM CORE-V toolchain
+        uses: actions/upload-artifact@v4
+        with:
+          name: llvm-corev-toolchain-macos
+          path: ${{ env.BUILD_ROOT }}/artifacts/llvm-corev-toolchain-macos.tar.gz
+          if-no-files-found: error
