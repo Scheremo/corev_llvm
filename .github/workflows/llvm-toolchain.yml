@@ -1,0 +1,67 @@
+name: LLVM CORE-V toolchain
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/llvm-toolchain.yml"
+      - "Makefile"
+      - ".gitmodules"
+      - "llvm-project/**"
+      - "picolibc/**"
+  push:
+    branches:
+      - main
+      - "codex/**"
+  workflow_dispatch:
+
+concurrency:
+  group: llvm-corev-toolchain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build LLVM toolchain and runtimes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    env:
+      BUILD_ROOT: ${{ github.workspace }}/.ci
+      LLVM_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv
+      LLVM_RUNTIMES_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv-runtimes
+      PICOLIBC_BUILD_DIR: ${{ github.workspace }}/.ci/build-picolibc-riscv
+      PICOLIBC_SYSROOT: ${{ github.workspace }}/.ci/build-llvm-riscv/picolibc/riscv32-corev-elf
+      TMP: /tmp
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            cmake \
+            meson \
+            ninja-build \
+            python3 \
+            ripgrep \
+            zsh
+
+      - name: Build and sanity-check LLVM CORE-V toolchain
+        run: |
+          make ci-llvm-toolchain JOBS="$(nproc)"
+
+      - name: Verify installed CORE-V multilibs
+        run: |
+          make print-llvm-multilibs | while read -r multilib; do
+            test -f "${LLVM_BUILD_DIR}/lib/${multilib}/libc++.a"
+            test -f "${LLVM_BUILD_DIR}/lib/${multilib}/libc++abi.a"
+            test -f "${LLVM_BUILD_DIR}/lib/${multilib}/libunwind.a"
+            test -f "${LLVM_BUILD_DIR}/lib/${multilib}/libclang_rt.builtins.a"
+            test -f "${PICOLIBC_SYSROOT}/lib/${multilib}/libc.a"
+          done
