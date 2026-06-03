@@ -320,6 +320,8 @@ package-stage-llvm-toolchain: install-llvm-runtimes
 	cp -R $(LLVM_BUILD_DIR)/lib/clang $(PACKAGE_STAGE)/lib/clang
 	cp -R $(CLANG_RUNTIMES_ROOT) $(PACKAGE_STAGE)/lib/clang-runtimes
 	if [ -d $(LLVM_BUILD_DIR)/include/c++ ]; then cp -R $(LLVM_BUILD_DIR)/include/c++ $(PACKAGE_STAGE)/include/c++; fi
+	if [ -d $(LLVM_BUILD_DIR)/share/libc++ ]; then mkdir -p $(PACKAGE_STAGE)/share && cp -R $(LLVM_BUILD_DIR)/share/libc++ $(PACKAGE_STAGE)/share/libc++; fi
+	if [ -f $(LLVM_BUILD_DIR)/lib/libc++.modules.json ]; then cp $(LLVM_BUILD_DIR)/lib/libc++.modules.json $(PACKAGE_STAGE)/lib/libc++.modules.json; fi
 	printf '%s\n' \
 		'set(CMAKE_SYSTEM_NAME Generic)' \
 		'set(CMAKE_SYSTEM_PROCESSOR riscv32)' \
