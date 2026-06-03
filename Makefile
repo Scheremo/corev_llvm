@@ -13,6 +13,9 @@ LLVM_RUNTIMES_BUILD_DIR ?= $(ROOT)/build-llvm-riscv-runtimes
 PICOLIBC_BUILD_DIR ?= $(ROOT)/build-picolibc-riscv
 LLVM_VERSION_MAJOR ?= 23
 LLVM_TARGETS_TO_BUILD ?= host;RISCV
+PACKAGE_NAME ?= llvm-corev-toolchain
+PACKAGE_STAGE ?= $(BUILD_ROOT)/package/$(PACKAGE_NAME)
+PACKAGE_ARCHIVE ?= $(BUILD_ROOT)/artifacts/$(PACKAGE_NAME).tar.gz
 
 JOBS ?= 8
 TMP ?= /private/tmp
@@ -63,7 +66,7 @@ COREV_SDK_RUNTIME_SYSROOT ?= $(CLANG_RUNTIMES_ROOT)/$(COREV_SDK_RUNTIME_TRIPLE)/
 PICOLIBC_SYSROOT ?= $(COREV_SDK_RUNTIME_SYSROOT)
 PICOLIBC_CROSS_FILE ?= $(ROOT)/build-picolibc-corev-llvm.cross
 
-LLVM_TOOLS := clang lld llvm-ar llvm-ranlib llvm-objcopy llvm-objdump llvm-nm llvm-strip llc llvm-mc FileCheck
+LLVM_TOOLS := clang lld llvm-ar llvm-ranlib llvm-objcopy llvm-objdump llvm-readobj llvm-nm llvm-size llvm-strip llc llvm-mc FileCheck
 LLVM_CLANG := $(LLVM_BUILD_DIR)/bin/clang
 LLVM_CLANGXX := $(LLVM_BUILD_DIR)/bin/clang++
 LLVM_LLC := $(LLVM_BUILD_DIR)/bin/llc
@@ -73,6 +76,7 @@ LLVM_MC := $(LLVM_BUILD_DIR)/bin/llvm-mc
 	build-llvm-runtimes install-llvm-runtimes install-llvm-runtimes-one install-llvm-multilib-yaml sanity-llvm-runtimes \
 	print-llvm-multilibs $(COREV_SDK_RUNTIME_TARGETS) \
 	ci-llvm-toolchain \
+	package-llvm-toolchain package-stage-llvm-toolchain sanity-package-llvm-toolchain \
 	build-picolibc install-picolibc sanity-picolibc \
 	clean-sanity clean-llvm-build clean-llvm-runtimes-build
 
@@ -281,7 +285,92 @@ check-llvm:
 check-lld:
 	cmake --build $(LLVM_BUILD_DIR) --target check-lld -j
 
-ci-llvm-toolchain: build-llvm check-clang check-llvm check-lld
+ci-llvm-toolchain: build-llvm install-llvm-runtimes check-clang check-llvm check-lld
+
+package-llvm-toolchain: package-stage-llvm-toolchain sanity-package-llvm-toolchain
+	mkdir -p $(dir $(PACKAGE_ARCHIVE))
+	rm -f $(PACKAGE_ARCHIVE)
+	tar -C $(dir $(PACKAGE_STAGE)) -czf $(PACKAGE_ARCHIVE) $(notdir $(PACKAGE_STAGE))
+
+package-stage-llvm-toolchain: install-llvm-runtimes
+	rm -rf $(PACKAGE_STAGE)
+	mkdir -p $(PACKAGE_STAGE)/bin $(PACKAGE_STAGE)/include $(PACKAGE_STAGE)/lib $(PACKAGE_STAGE)/share/cmake/corev-llvm
+	for tool in \
+		clang:clang \
+		clang++:clang++ \
+		cc:clang \
+		c++:clang++ \
+		ld:ld.lld \
+		ld.lld:ld.lld \
+		lld:lld \
+		ar:llvm-ar \
+		ranlib:llvm-ranlib \
+		objcopy:llvm-objcopy \
+		objdump:llvm-objdump \
+		readelf:llvm-readelf \
+		readobj:llvm-readobj \
+		size:llvm-size \
+		strip:llvm-strip \
+		nm:llvm-nm; do \
+		dst=$${tool%%:*}; \
+		src=$${tool##*:}; \
+		cp -L $(LLVM_BUILD_DIR)/bin/$$src $(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-$$dst; \
+		chmod +x $(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-$$dst; \
+	done
+	cp -R $(LLVM_BUILD_DIR)/lib/clang $(PACKAGE_STAGE)/lib/clang
+	cp -R $(CLANG_RUNTIMES_ROOT) $(PACKAGE_STAGE)/lib/clang-runtimes
+	if [ -d $(LLVM_BUILD_DIR)/include/c++ ]; then cp -R $(LLVM_BUILD_DIR)/include/c++ $(PACKAGE_STAGE)/include/c++; fi
+	printf '%s\n' \
+		'set(CMAKE_SYSTEM_NAME Generic)' \
+		'set(CMAKE_SYSTEM_PROCESSOR riscv32)' \
+		'' \
+		'get_filename_component(_COREV_LLVM_PREFIX "$${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)' \
+		'' \
+		'set(COREV_LLVM_TARGET "$(COREV_SDK_TRIPLE)" CACHE STRING "CORE-V LLVM target triple")' \
+		'set(COREV_MARCH "$(COREV_SDK_ARCH)" CACHE STRING "CORE-V RISC-V ISA string")' \
+		'set(COREV_MABI "$(COREV_SDK_ABI)" CACHE STRING "CORE-V RISC-V ABI")' \
+		'' \
+		'set(CMAKE_C_COMPILER "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-clang" CACHE FILEPATH "")' \
+		'set(CMAKE_CXX_COMPILER "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-clang++" CACHE FILEPATH "")' \
+		'set(CMAKE_ASM_COMPILER "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-clang" CACHE FILEPATH "")' \
+		'' \
+		'set(CMAKE_AR "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-ar" CACHE FILEPATH "")' \
+		'set(CMAKE_RANLIB "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-ranlib" CACHE FILEPATH "")' \
+		'set(CMAKE_LINKER "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-ld.lld" CACHE FILEPATH "")' \
+		'set(CMAKE_OBJCOPY "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-objcopy" CACHE FILEPATH "")' \
+		'set(CMAKE_OBJDUMP "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-objdump" CACHE FILEPATH "")' \
+		'set(CMAKE_SIZE "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-size" CACHE FILEPATH "")' \
+		'' \
+		'set(CMAKE_C_COMPILER_TARGET "$${COREV_LLVM_TARGET}")' \
+		'set(CMAKE_CXX_COMPILER_TARGET "$${COREV_LLVM_TARGET}")' \
+		'set(CMAKE_ASM_COMPILER_TARGET "$${COREV_LLVM_TARGET}")' \
+		'' \
+		'set(CMAKE_C_FLAGS_INIT "-march=$${COREV_MARCH} -mabi=$${COREV_MABI}")' \
+		'set(CMAKE_CXX_FLAGS_INIT "-march=$${COREV_MARCH} -mabi=$${COREV_MABI}")' \
+		'set(CMAKE_ASM_FLAGS_INIT "-march=$${COREV_MARCH} -mabi=$${COREV_MABI}")' \
+		'set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld --rtlib=compiler-rt")' \
+		'' \
+		'set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)' \
+		> $(PACKAGE_STAGE)/share/cmake/corev-llvm/$(COREV_SDK_TRIPLE).cmake
+
+sanity-package-llvm-toolchain: package-stage-llvm-toolchain
+	rm -rf $(BUILD_ROOT)/package-smoke
+	mkdir -p $(BUILD_ROOT)/package-smoke/src $(BUILD_ROOT)/package-smoke/build
+	printf '%s\n' \
+		'cmake_minimum_required(VERSION 3.20)' \
+		'project(corev_package_smoke C CXX ASM)' \
+		'add_library(corev_package_smoke STATIC smoke.c smoke.cc smoke.S)' \
+		> $(BUILD_ROOT)/package-smoke/src/CMakeLists.txt
+	printf '%s\n' 'int smoke_c(void) { return 0; }' > $(BUILD_ROOT)/package-smoke/src/smoke.c
+	printf '%s\n' 'int smoke_cxx() { return 0; }' > $(BUILD_ROOT)/package-smoke/src/smoke.cc
+	printf '%s\n' '.text' '.globl smoke_asm' 'smoke_asm:' '  ret' > $(BUILD_ROOT)/package-smoke/src/smoke.S
+	cmake -S $(BUILD_ROOT)/package-smoke/src -B $(BUILD_ROOT)/package-smoke/build \
+		-DCMAKE_TOOLCHAIN_FILE=$(PACKAGE_STAGE)/share/cmake/corev-llvm/$(COREV_SDK_TRIPLE).cmake \
+		-DCOREV_MARCH=$(COREV_SDK_ARCH) \
+		-DCOREV_MABI=$(COREV_SDK_ABI)
+	cmake --build $(BUILD_ROOT)/package-smoke/build --parallel $(JOBS)
+	$(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-clang -print-multi-directory \
+		--target=$(COREV_SDK_TRIPLE) -march=$(COREV_SDK_ARCH) -mabi=$(COREV_SDK_ABI)
 
 clean-sanity:
 	rm -f $(TMP)/llvm-clang-alu.s $(TMP)/llvm-xcvalu.s \
