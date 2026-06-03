@@ -22,44 +22,90 @@ jobs:
   build-linux:
     name: Build LLVM toolchain and runtimes (Linux)
     runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:20.04
     timeout-minutes: 360
 
     env:
+      DEBIAN_FRONTEND: noninteractive
       BUILD_ROOT: ${{ github.workspace }}/.ci
-      LLVM_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv
-      LLVM_RUNTIMES_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv-runtimes
-      CLANG_RUNTIMES_ROOT: ${{ github.workspace }}/.ci/build-llvm-riscv/lib/clang-runtimes
+      LLVM_BUILD_DIR: ${{ github.workspace }}/.ci/llvm-riscv
+      LLVM_RUNTIMES_BUILD_DIR: ${{ github.workspace }}/.ci/llvm-riscv-runtimes
+      LLVM_CMAKE_BUILD_TYPE: Release
+      LLVM_LIT_ARGS: "-v --timeout=120 --time-tests --print-result-after=failed --no-progress-bar"
+      CLANG_RUNTIMES_ROOT: ${{ github.workspace }}/.ci/llvm-riscv/lib/clang-runtimes
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPRESS: "true"
       TMP: /tmp
 
     steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            ccache \
+            git \
+            python3 \
+            python3-pip \
+            ripgrep \
+            zsh
+          python3 -m pip install --no-cache-dir \
+            cmake \
+            meson \
+            ninja \
+            psutil
+
       - name: Check out sources
         uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            ca-certificates \
-            cmake \
-            meson \
-            ninja-build \
-            python3 \
-            ripgrep \
-            zsh
+      - name: Compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-linux-${{ runner.arch }}-${{ hashFiles('Makefile', '.github/workflows/llvm-toolchain.yml') }}
+          restore-keys: |
+            ccache-linux-${{ runner.arch }}-
 
-      - name: Build and sanity-check LLVM CORE-V toolchain
+      - name: Show Linux package baseline
         run: |
-          make ci-llvm-toolchain JOBS="$(nproc)"
+          ldd --version | head -n 1
+          cmake --version | head -n 1
+          meson --version
+          ninja --version
+          ccache --version | head -n 1
+          ccache --zero-stats
+
+      - name: Build LLVM CORE-V compiler
+        run: |
+          make build-llvm JOBS="$(nproc)" LLVM_COMPILER_LAUNCHER=ccache
+
+      - name: Build and install CORE-V multilib runtimes
+        run: |
+          make install-llvm-runtimes JOBS="$(nproc)" LLVM_COMPILER_LAUNCHER=ccache
+
+      - name: Run Clang RISCV tests
+        run: |
+          make check-clang-riscv JOBS="$(nproc)"
+
+      - name: Run LLVM RISCV tests
+        run: |
+          make check-llvm-riscv JOBS="$(nproc)"
+
+      - name: Run LLD tests
+        run: |
+          make check-lld JOBS="$(nproc)"
 
       - name: Verify installed CORE-V multilibs
         run: |
           test -f "${CLANG_RUNTIMES_ROOT}/multilib.yaml"
           make print-llvm-multilibs | while read -r multilib; do
-            libdir="${CLANG_RUNTIMES_ROOT}/riscv32-corev-elf/${multilib}/lib"
+            libdir="${CLANG_RUNTIMES_ROOT}/riscv32-unknown-elf/${multilib}/lib"
             test -f "${libdir}/libc.a"
             test -f "${libdir}/libc++.a"
             test -f "${libdir}/libc++abi.a"
@@ -69,8 +115,15 @@ jobs:
 
       - name: Package LLVM CORE-V toolchain
         run: |
-          mkdir -p "${BUILD_ROOT}/artifacts"
-          tar -C "${BUILD_ROOT}" -czf "${BUILD_ROOT}/artifacts/llvm-corev-toolchain-linux.tar.gz" build-llvm-riscv
+          make package-llvm-toolchain \
+            PACKAGE_ARCHIVE="${BUILD_ROOT}/artifacts/llvm-corev-toolchain-linux.tar.gz" \
+            JOBS="$(nproc)" \
+            LLVM_COMPILER_LAUNCHER=ccache
+
+      - name: Show compiler cache statistics
+        if: always()
+        run: |
+          ccache --show-stats
 
       - name: Upload LLVM CORE-V toolchain
         uses: actions/upload-artifact@v4
@@ -86,9 +139,15 @@ jobs:
 
     env:
       BUILD_ROOT: ${{ github.workspace }}/.ci
-      LLVM_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv
-      LLVM_RUNTIMES_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv-runtimes
-      CLANG_RUNTIMES_ROOT: ${{ github.workspace }}/.ci/build-llvm-riscv/lib/clang-runtimes
+      LLVM_BUILD_DIR: ${{ github.workspace }}/.ci/llvm-riscv
+      LLVM_RUNTIMES_BUILD_DIR: ${{ github.workspace }}/.ci/llvm-riscv-runtimes
+      LLVM_CMAKE_BUILD_TYPE: Release
+      LLVM_LIT_ARGS: "-v --timeout=120 --time-tests --print-result-after=failed --no-progress-bar"
+      LLVM_PYTHON_EXECUTABLE: ${{ github.workspace }}/.ci/python-venv/bin/python3
+      CLANG_RUNTIMES_ROOT: ${{ github.workspace }}/.ci/llvm-riscv/lib/clang-runtimes
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPRESS: "true"
       TMP: /tmp
 
     steps:
@@ -101,17 +160,53 @@ jobs:
       - name: Install build dependencies
         run: |
           brew update
-          brew install cmake meson ninja ripgrep
+          brew install ccache cmake meson ninja ripgrep
+          mkdir -p "${BUILD_ROOT}"
+          python3 -m venv "${BUILD_ROOT}/python-venv"
+          "${LLVM_PYTHON_EXECUTABLE}" -m pip install --upgrade pip
+          "${LLVM_PYTHON_EXECUTABLE}" -m pip install --no-cache-dir psutil
 
-      - name: Build and sanity-check LLVM CORE-V toolchain
+      - name: Compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-macos-${{ runner.arch }}-${{ hashFiles('Makefile', '.github/workflows/llvm-toolchain.yml') }}
+          restore-keys: |
+            ccache-macos-${{ runner.arch }}-
+
+      - name: Show macOS package baseline
         run: |
-          make ci-llvm-toolchain JOBS="$(sysctl -n hw.ncpu)"
+          cmake --version | head -n 1
+          meson --version
+          ninja --version
+          ccache --version | head -n 1
+          ccache --zero-stats
+
+      - name: Build LLVM CORE-V compiler
+        run: |
+          make build-llvm JOBS="$(sysctl -n hw.ncpu)" LLVM_COMPILER_LAUNCHER=ccache
+
+      - name: Build and install CORE-V multilib runtimes
+        run: |
+          make install-llvm-runtimes JOBS="$(sysctl -n hw.ncpu)" LLVM_COMPILER_LAUNCHER=ccache
+
+      - name: Run Clang RISCV tests
+        run: |
+          make check-clang-riscv JOBS="$(sysctl -n hw.ncpu)"
+
+      - name: Run LLVM RISCV tests
+        run: |
+          make check-llvm-riscv JOBS="$(sysctl -n hw.ncpu)"
+
+      - name: Run LLD tests
+        run: |
+          make check-lld JOBS="$(sysctl -n hw.ncpu)"
 
       - name: Verify installed CORE-V multilibs
         run: |
           test -f "${CLANG_RUNTIMES_ROOT}/multilib.yaml"
           make print-llvm-multilibs | while read -r multilib; do
-            libdir="${CLANG_RUNTIMES_ROOT}/riscv32-corev-elf/${multilib}/lib"
+            libdir="${CLANG_RUNTIMES_ROOT}/riscv32-unknown-elf/${multilib}/lib"
             test -f "${libdir}/libc.a"
             test -f "${libdir}/libc++.a"
             test -f "${libdir}/libc++abi.a"
@@ -121,8 +216,15 @@ jobs:
 
       - name: Package LLVM CORE-V toolchain
         run: |
-          mkdir -p "${BUILD_ROOT}/artifacts"
-          tar -C "${BUILD_ROOT}" -czf "${BUILD_ROOT}/artifacts/llvm-corev-toolchain-macos.tar.gz" build-llvm-riscv
+          make package-llvm-toolchain \
+            PACKAGE_ARCHIVE="${BUILD_ROOT}/artifacts/llvm-corev-toolchain-macos.tar.gz" \
+            JOBS="$(sysctl -n hw.ncpu)" \
+            LLVM_COMPILER_LAUNCHER=ccache
+
+      - name: Show compiler cache statistics
+        if: always()
+        run: |
+          ccache --show-stats
 
       - name: Upload LLVM CORE-V toolchain
         uses: actions/upload-artifact@v4

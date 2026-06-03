@@ -4,17 +4,58 @@
 SHELL := /bin/zsh
 
 ROOT := $(CURDIR)
-BUILD_ROOT ?= $(ROOT)
+BUILD_ROOT ?= $(ROOT)/build
 LLVM_SRC := $(ROOT)/llvm-project/llvm
 PICOLIBC_SRC := $(ROOT)/picolibc
 
-LLVM_BUILD_DIR ?= $(ROOT)/build-llvm-riscv
-LLVM_RUNTIMES_BUILD_DIR ?= $(ROOT)/build-llvm-riscv-runtimes
-PICOLIBC_BUILD_DIR ?= $(ROOT)/build-picolibc-riscv
+LLVM_BUILD_DIR ?= $(BUILD_ROOT)/llvm-riscv
+LLVM_RUNTIMES_BUILD_DIR ?= $(BUILD_ROOT)/llvm-riscv-runtimes
+PICOLIBC_BUILD_DIR ?= $(BUILD_ROOT)/picolibc-riscv
 LLVM_VERSION_MAJOR ?= 23
+LLVM_CMAKE_BUILD_TYPE ?= RelWithDebInfo
 LLVM_TARGETS_TO_BUILD ?= host;RISCV
+LLVM_LIT_ARGS ?= -sv
+LLVM_PYTHON_EXECUTABLE ?=
+LLVM_RISCV_CHECK_TARGETS ?= \
+	check-llvm-codegen-riscv \
+	check-llvm-mc-riscv \
+	check-llvm-mc-disassembler-riscv \
+	check-llvm-tools-llvm-mca-riscv \
+	check-llvm-tools-llvm-objdump-elf-riscv \
+	check-llvm-tools-llvm-readobj-elf-riscv
+CLANG_RISCV_CHECK_TARGETS ?= \
+	check-clang-codegen-riscv \
+	check-clang-cir-codegenbuiltins-riscv \
+	check-clang-debuginfo-riscv \
+	check-clang-driver-print-enabled-extensions
+PACKAGE_NAME ?= llvm-corev-toolchain
+PACKAGE_STAGE ?= $(BUILD_ROOT)/package/$(PACKAGE_NAME)
+PACKAGE_ARCHIVE ?= $(BUILD_ROOT)/artifacts/$(PACKAGE_NAME).tar.gz
 
 JOBS ?= 8
+LLVM_PARALLEL_LINK_JOBS ?= 1
+LLVM_COMPILER_LAUNCHER ?=
+LLVM_COMPILER_LAUNCHER_CMAKE_FLAGS := -DCMAKE_C_COMPILER_LAUNCHER=$(LLVM_COMPILER_LAUNCHER) -DCMAKE_CXX_COMPILER_LAUNCHER=$(LLVM_COMPILER_LAUNCHER)
+LLVM_PYTHON_CMAKE_FLAG := $(if $(LLVM_PYTHON_EXECUTABLE),-DPython3_EXECUTABLE=$(LLVM_PYTHON_EXECUTABLE),)
+LLVM_LEAN_CMAKE_FLAGS := \
+	-DCLANG_ENABLE_OBJC_REWRITER=OFF \
+	-DCLANG_ENABLE_STATIC_ANALYZER=OFF \
+	-DLLVM_ENABLE_BINDINGS=OFF \
+	-DLLVM_ENABLE_CURL=OFF \
+	-DLLVM_ENABLE_FFI=OFF \
+	-DLLVM_ENABLE_HTTPLIB=OFF \
+	-DLLVM_ENABLE_LIBEDIT=OFF \
+	-DLLVM_ENABLE_LIBXML2=OFF \
+	-DLLVM_ENABLE_OCAMLDOC=OFF \
+	-DLLVM_ENABLE_PLUGINS=OFF \
+	-DLLVM_ENABLE_Z3_SOLVER=OFF \
+	-DLLVM_ENABLE_ZLIB=OFF \
+	-DLLVM_ENABLE_ZSTD=OFF \
+	-DLLVM_INCLUDE_BENCHMARKS=OFF \
+	-DLLVM_INCLUDE_DOCS=OFF \
+	-DLLVM_INCLUDE_EXAMPLES=OFF
+comma := ,
+PICOLIBC_COMPILER_LAUNCHER_PREFIX := $(if $(LLVM_COMPILER_LAUNCHER),'$(LLVM_COMPILER_LAUNCHER)'$(comma) ,)
 TMP ?= /private/tmp
 
 ABI := ilp32
@@ -61,9 +102,9 @@ LLVM_MULTILIB_STAMPS := $(addprefix $(LLVM_MULTILIB_STAMP_DIR)/,$(addsuffix .sta
 CLANG_RUNTIMES_ROOT ?= $(LLVM_BUILD_DIR)/lib/clang-runtimes
 COREV_SDK_RUNTIME_SYSROOT ?= $(CLANG_RUNTIMES_ROOT)/$(COREV_SDK_RUNTIME_TRIPLE)/$(COREV_SDK_LLVM_MULTILIB)
 PICOLIBC_SYSROOT ?= $(COREV_SDK_RUNTIME_SYSROOT)
-PICOLIBC_CROSS_FILE ?= $(ROOT)/build-picolibc-corev-llvm.cross
+PICOLIBC_CROSS_FILE ?= $(BUILD_ROOT)/picolibc-corev-llvm.cross
 
-LLVM_TOOLS := clang lld llvm-ar llvm-ranlib llvm-objcopy llvm-objdump llvm-nm llvm-strip llc llvm-mc FileCheck
+LLVM_TOOLS := clang lld llvm-ar llvm-ranlib llvm-objcopy llvm-objdump llvm-readobj llvm-nm llvm-size llvm-strip llc llvm-mc FileCheck
 LLVM_CLANG := $(LLVM_BUILD_DIR)/bin/clang
 LLVM_CLANGXX := $(LLVM_BUILD_DIR)/bin/clang++
 LLVM_LLC := $(LLVM_BUILD_DIR)/bin/llc
@@ -72,26 +113,32 @@ LLVM_MC := $(LLVM_BUILD_DIR)/bin/llvm-mc
 .PHONY: all build build-llvm sanity sanity-llvm versions \
 	build-llvm-runtimes install-llvm-runtimes install-llvm-runtimes-one install-llvm-multilib-yaml sanity-llvm-runtimes \
 	print-llvm-multilibs $(COREV_SDK_RUNTIME_TARGETS) \
+	check-clang check-clang-riscv check-llvm check-llvm-riscv check-lld \
 	ci-llvm-toolchain \
+	package-llvm-toolchain package-stage-llvm-toolchain sanity-package-llvm-toolchain \
 	build-picolibc install-picolibc sanity-picolibc \
 	clean-sanity clean-llvm-build clean-llvm-runtimes-build
 
 all: build sanity
 
-build: build-llvm
+build: build-llvm install-llvm-runtimes
 
 build-llvm: $(LLVM_BUILD_DIR)/.corev-configured
 	cmake --build $(LLVM_BUILD_DIR) --target $(LLVM_TOOLS) --parallel $(JOBS)
 
 $(LLVM_BUILD_DIR)/.corev-configured: Makefile
 	cmake -G Ninja -S $(LLVM_SRC) -B $(LLVM_BUILD_DIR) \
-		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_BUILD_TYPE=$(LLVM_CMAKE_BUILD_TYPE) \
 		-DLLVM_ENABLE_PROJECTS='clang;lld' \
 		-DLLVM_TARGETS_TO_BUILD='$(LLVM_TARGETS_TO_BUILD)' \
 		-DLLVM_INCLUDE_TESTS=ON \
 		-DCLANG_INCLUDE_TESTS=ON \
+		-DLLVM_LIT_ARGS='$(LLVM_LIT_ARGS)' \
+		$(LLVM_PYTHON_CMAKE_FLAG) \
 		-DLLVM_ENABLE_ASSERTIONS=ON \
-		-DLLVM_ENABLE_ZSTD=OFF
+		-DLLVM_PARALLEL_LINK_JOBS=$(LLVM_PARALLEL_LINK_JOBS) \
+		$(LLVM_LEAN_CMAKE_FLAGS) \
+		$(LLVM_COMPILER_LAUNCHER_CMAKE_FLAGS)
 	touch $@
 
 print-llvm-multilibs:
@@ -107,10 +154,10 @@ $(LLVM_MULTILIB_STAMP_DIR)/$(subst /,_,$(1)).stamp: Makefile build-llvm install-
 	mkdir -p $(LLVM_MULTILIB_STAMP_DIR)
 	$$(MAKE) install-llvm-runtimes-one \
 		COREV_SDK_LLVM_MULTILIB=$(1) \
-		PICOLIBC_CROSS_FILE=$(BUILD_ROOT)/build-picolibc-corev-llvm-$(subst /,_,$(1)).cross \
-		PICOLIBC_BUILD_DIR=$(BUILD_ROOT)/build-picolibc-riscv-$(subst /,_,$(1)) \
+		PICOLIBC_CROSS_FILE=$(BUILD_ROOT)/picolibc-corev-llvm-$(subst /,_,$(1)).cross \
+		PICOLIBC_BUILD_DIR=$(BUILD_ROOT)/picolibc-riscv-$(subst /,_,$(1)) \
 		COREV_SDK_RUNTIME_SYSROOT=$(CLANG_RUNTIMES_ROOT)/$(COREV_SDK_RUNTIME_TRIPLE)/$(1) \
-		LLVM_RUNTIMES_BUILD_DIR=$(BUILD_ROOT)/build-llvm-riscv-runtimes-$(subst /,_,$(1))
+		LLVM_RUNTIMES_BUILD_DIR=$(BUILD_ROOT)/llvm-riscv-runtimes-$(subst /,_,$(1))
 	touch $$@
 
 install-llvm-runtime-$(subst /,_,$(1)): $(LLVM_MULTILIB_STAMP_DIR)/$(subst /,_,$(1)).stamp
@@ -164,9 +211,9 @@ $(PICOLIBC_CROSS_FILE): Makefile build-llvm
 	mkdir -p $(PICOLIBC_BUILD_DIR)
 	printf '%s\n' \
 		'[binaries]' \
-		"c = ['$(LLVM_CLANG)', '--target=$(COREV_SDK_TRIPLE)', '-march=$(COREV_SDK_ARCH)', '-mabi=$(COREV_SDK_ABI)', '-nostdlib', '-ffreestanding']" \
+		"c = [$(PICOLIBC_COMPILER_LAUNCHER_PREFIX)'$(LLVM_CLANG)', '--target=$(COREV_SDK_TRIPLE)', '-march=$(COREV_SDK_ARCH)', '-mabi=$(COREV_SDK_ABI)', '-nostdlib', '-ffreestanding']" \
 		"ar = '$(LLVM_BUILD_DIR)/bin/llvm-ar'" \
-		"as = ['$(LLVM_CLANG)', '--target=$(COREV_SDK_TRIPLE)', '-march=$(COREV_SDK_ARCH)', '-mabi=$(COREV_SDK_ABI)']" \
+		"as = [$(PICOLIBC_COMPILER_LAUNCHER_PREFIX)'$(LLVM_CLANG)', '--target=$(COREV_SDK_TRIPLE)', '-march=$(COREV_SDK_ARCH)', '-mabi=$(COREV_SDK_ABI)']" \
 		"ld = '$(LLVM_BUILD_DIR)/bin/ld.lld'" \
 		"c_ld = '$(LLVM_BUILD_DIR)/bin/ld.lld'" \
 		"nm = '$(LLVM_BUILD_DIR)/bin/llvm-nm'" \
@@ -212,11 +259,12 @@ $(PICOLIBC_BUILD_DIR)/.corev-configured: Makefile $(PICOLIBC_CROSS_FILE)
 
 $(LLVM_RUNTIMES_BUILD_DIR)/.corev-configured: Makefile build-llvm install-picolibc
 	cmake -G Ninja -S $(ROOT)/llvm-project/runtimes -B $(LLVM_RUNTIMES_BUILD_DIR) \
-		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_BUILD_TYPE=$(LLVM_CMAKE_BUILD_TYPE) \
 		-DCMAKE_INSTALL_PREFIX=$(LLVM_BUILD_DIR) \
 		-DCMAKE_C_COMPILER=$(LLVM_CLANG) \
 		-DCMAKE_CXX_COMPILER=$(LLVM_CLANGXX) \
 		-DCMAKE_ASM_COMPILER=$(LLVM_CLANG) \
+		$(LLVM_COMPILER_LAUNCHER_CMAKE_FLAGS) \
 		-DCMAKE_AR=$(LLVM_BUILD_DIR)/bin/llvm-ar \
 		-DCMAKE_RANLIB=$(LLVM_BUILD_DIR)/bin/llvm-ranlib \
 		-DCMAKE_OBJCOPY=$(LLVM_BUILD_DIR)/bin/llvm-objcopy \
@@ -272,16 +320,110 @@ versions: build
 	$(LLVM_CLANG) --version
 	$(LLVM_LLC) --version | sed -n '1,8p'
 
-check-clang:
-	cmake --build $(LLVM_BUILD_DIR) --target check-clang -j
+check-clang: build-llvm
+	cmake --build $(LLVM_BUILD_DIR) --target check-clang --parallel $(JOBS)
 
-check-llvm:
-	cmake --build $(LLVM_BUILD_DIR) --target check-llvm -j
+check-clang-riscv: build-llvm
+	cmake --build $(LLVM_BUILD_DIR) --target $(CLANG_RISCV_CHECK_TARGETS) --parallel $(JOBS)
 
-check-lld:
-	cmake --build $(LLVM_BUILD_DIR) --target check-lld -j
+check-llvm: build-llvm
+	cmake --build $(LLVM_BUILD_DIR) --target check-llvm --parallel $(JOBS)
 
-ci-llvm-toolchain: build-llvm check-clang check-llvm check-lld
+check-llvm-riscv: build-llvm
+	cmake --build $(LLVM_BUILD_DIR) --target $(LLVM_RISCV_CHECK_TARGETS) --parallel $(JOBS)
+
+check-lld: build-llvm
+	cmake --build $(LLVM_BUILD_DIR) --target check-lld --parallel $(JOBS)
+
+ci-llvm-toolchain: build check-clang-riscv check-llvm-riscv check-lld
+
+package-llvm-toolchain: package-stage-llvm-toolchain sanity-package-llvm-toolchain
+	mkdir -p $(dir $(PACKAGE_ARCHIVE))
+	rm -f $(PACKAGE_ARCHIVE)
+	tar -C $(dir $(PACKAGE_STAGE)) -czf $(PACKAGE_ARCHIVE) $(notdir $(PACKAGE_STAGE))
+
+package-stage-llvm-toolchain: install-llvm-runtimes
+	rm -rf $(PACKAGE_STAGE)
+	mkdir -p $(PACKAGE_STAGE)/bin $(PACKAGE_STAGE)/include $(PACKAGE_STAGE)/lib $(PACKAGE_STAGE)/share/cmake/corev-llvm
+	for tool in \
+		clang:clang \
+		clang++:clang++ \
+		cc:clang \
+		c++:clang++ \
+		ld:ld.lld \
+		ld.lld:ld.lld \
+		lld:lld \
+		ar:llvm-ar \
+		ranlib:llvm-ranlib \
+		objcopy:llvm-objcopy \
+		objdump:llvm-objdump \
+		readelf:llvm-readelf \
+		readobj:llvm-readobj \
+		size:llvm-size \
+		strip:llvm-strip \
+		nm:llvm-nm \
+		mc:llvm-mc; do \
+		dst=$${tool%%:*}; \
+		src=$${tool##*:}; \
+		cp -L $(LLVM_BUILD_DIR)/bin/$$src $(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-$$dst; \
+		chmod +x $(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-$$dst; \
+	done
+	cp -R $(LLVM_BUILD_DIR)/lib/clang $(PACKAGE_STAGE)/lib/clang
+	cp -R $(CLANG_RUNTIMES_ROOT) $(PACKAGE_STAGE)/lib/clang-runtimes
+	if [ -d $(LLVM_BUILD_DIR)/include/c++ ]; then cp -R $(LLVM_BUILD_DIR)/include/c++ $(PACKAGE_STAGE)/include/c++; fi
+	if [ -d $(LLVM_BUILD_DIR)/share/libc++ ]; then mkdir -p $(PACKAGE_STAGE)/share && cp -R $(LLVM_BUILD_DIR)/share/libc++ $(PACKAGE_STAGE)/share/libc++; fi
+	if [ -f $(LLVM_BUILD_DIR)/lib/libc++.modules.json ]; then cp $(LLVM_BUILD_DIR)/lib/libc++.modules.json $(PACKAGE_STAGE)/lib/libc++.modules.json; fi
+	printf '%s\n' \
+		'set(CMAKE_SYSTEM_NAME Generic)' \
+		'set(CMAKE_SYSTEM_PROCESSOR riscv32)' \
+		'' \
+		'get_filename_component(_COREV_LLVM_PREFIX "$${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)' \
+		'' \
+		'set(COREV_LLVM_TARGET "$(COREV_SDK_TRIPLE)" CACHE STRING "CORE-V LLVM target triple")' \
+		'set(COREV_MARCH "$(COREV_SDK_ARCH)" CACHE STRING "CORE-V RISC-V ISA string")' \
+		'set(COREV_MABI "$(COREV_SDK_ABI)" CACHE STRING "CORE-V RISC-V ABI")' \
+		'' \
+		'set(CMAKE_C_COMPILER "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-clang" CACHE FILEPATH "")' \
+		'set(CMAKE_CXX_COMPILER "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-clang++" CACHE FILEPATH "")' \
+		'set(CMAKE_ASM_COMPILER "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-clang" CACHE FILEPATH "")' \
+		'' \
+		'set(CMAKE_AR "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-ar" CACHE FILEPATH "")' \
+		'set(CMAKE_RANLIB "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-ranlib" CACHE FILEPATH "")' \
+		'set(CMAKE_LINKER "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-ld.lld" CACHE FILEPATH "")' \
+		'set(CMAKE_OBJCOPY "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-objcopy" CACHE FILEPATH "")' \
+		'set(CMAKE_OBJDUMP "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-objdump" CACHE FILEPATH "")' \
+		'set(CMAKE_SIZE "$${_COREV_LLVM_PREFIX}/bin/$(COREV_SDK_TRIPLE)-size" CACHE FILEPATH "")' \
+		'' \
+		'set(CMAKE_C_COMPILER_TARGET "$${COREV_LLVM_TARGET}")' \
+		'set(CMAKE_CXX_COMPILER_TARGET "$${COREV_LLVM_TARGET}")' \
+		'set(CMAKE_ASM_COMPILER_TARGET "$${COREV_LLVM_TARGET}")' \
+		'' \
+		'set(CMAKE_C_FLAGS_INIT "-march=$${COREV_MARCH} -mabi=$${COREV_MABI}")' \
+		'set(CMAKE_CXX_FLAGS_INIT "-march=$${COREV_MARCH} -mabi=$${COREV_MABI}")' \
+		'set(CMAKE_ASM_FLAGS_INIT "-march=$${COREV_MARCH} -mabi=$${COREV_MABI}")' \
+		'set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld --rtlib=compiler-rt")' \
+		'' \
+		'set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)' \
+		> $(PACKAGE_STAGE)/share/cmake/corev-llvm/$(COREV_SDK_TRIPLE).cmake
+
+sanity-package-llvm-toolchain: package-stage-llvm-toolchain
+	rm -rf $(BUILD_ROOT)/package-smoke
+	mkdir -p $(BUILD_ROOT)/package-smoke/src $(BUILD_ROOT)/package-smoke/build
+	printf '%s\n' \
+		'cmake_minimum_required(VERSION 3.20)' \
+		'project(corev_package_smoke C CXX ASM)' \
+		'add_library(corev_package_smoke STATIC smoke.c smoke.cc smoke.S)' \
+		> $(BUILD_ROOT)/package-smoke/src/CMakeLists.txt
+	printf '%s\n' 'int smoke_c(void) { return 0; }' > $(BUILD_ROOT)/package-smoke/src/smoke.c
+	printf '%s\n' 'int smoke_cxx() { return 0; }' > $(BUILD_ROOT)/package-smoke/src/smoke.cc
+	printf '%s\n' '.text' '.globl smoke_asm' 'smoke_asm:' '  ret' > $(BUILD_ROOT)/package-smoke/src/smoke.S
+	cmake -S $(BUILD_ROOT)/package-smoke/src -B $(BUILD_ROOT)/package-smoke/build \
+		-DCMAKE_TOOLCHAIN_FILE=$(PACKAGE_STAGE)/share/cmake/corev-llvm/$(COREV_SDK_TRIPLE).cmake \
+		-DCOREV_MARCH=$(COREV_SDK_ARCH) \
+		-DCOREV_MABI=$(COREV_SDK_ABI)
+	cmake --build $(BUILD_ROOT)/package-smoke/build --parallel $(JOBS)
+	$(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-clang -print-multi-directory \
+		--target=$(COREV_SDK_TRIPLE) -march=$(COREV_SDK_ARCH) -mabi=$(COREV_SDK_ABI)
 
 clean-sanity:
 	rm -f $(TMP)/llvm-clang-alu.s $(TMP)/llvm-xcvalu.s \
@@ -296,6 +438,6 @@ clean-llvm-runtimes-build:
 	rm -rf $(LLVM_RUNTIMES_BUILD_DIR)
 	rm -rf $(LLVM_MULTILIB_STAMP_DIR)
 	rm -rf $(CLANG_RUNTIMES_ROOT)
-	rm -rf $(BUILD_ROOT)/build-llvm-riscv-runtimes-*
-	rm -rf $(BUILD_ROOT)/build-picolibc-riscv-*
-	rm -f $(BUILD_ROOT)/build-picolibc-corev-llvm-*.cross
+	rm -rf $(BUILD_ROOT)/llvm-riscv-runtimes-*
+	rm -rf $(BUILD_ROOT)/picolibc-riscv-*
+	rm -f $(BUILD_ROOT)/picolibc-corev-llvm-*.cross
