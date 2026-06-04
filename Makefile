@@ -4,13 +4,13 @@
 SHELL := /bin/zsh
 
 ROOT := $(CURDIR)
-BUILD_ROOT ?= $(ROOT)
+BUILD_ROOT ?= $(ROOT)/build
 LLVM_SRC := $(ROOT)/llvm-project/llvm
 PICOLIBC_SRC := $(ROOT)/picolibc
 
-LLVM_BUILD_DIR ?= $(ROOT)/build-llvm-riscv
-LLVM_RUNTIMES_BUILD_DIR ?= $(ROOT)/build-llvm-riscv-runtimes
-PICOLIBC_BUILD_DIR ?= $(ROOT)/build-picolibc-riscv
+LLVM_BUILD_DIR ?= $(BUILD_ROOT)/llvm-riscv
+LLVM_RUNTIMES_BUILD_DIR ?= $(BUILD_ROOT)/llvm-riscv-runtimes
+PICOLIBC_BUILD_DIR ?= $(BUILD_ROOT)/picolibc-riscv
 LLVM_VERSION_MAJOR ?= 23
 LLVM_CMAKE_BUILD_TYPE ?= RelWithDebInfo
 LLVM_TARGETS_TO_BUILD ?= host;RISCV
@@ -87,7 +87,7 @@ LLVM_MULTILIB_STAMPS := $(addprefix $(LLVM_MULTILIB_STAMP_DIR)/,$(addsuffix .sta
 CLANG_RUNTIMES_ROOT ?= $(LLVM_BUILD_DIR)/lib/clang-runtimes
 COREV_SDK_RUNTIME_SYSROOT ?= $(CLANG_RUNTIMES_ROOT)/$(COREV_SDK_RUNTIME_TRIPLE)/$(COREV_SDK_LLVM_MULTILIB)
 PICOLIBC_SYSROOT ?= $(COREV_SDK_RUNTIME_SYSROOT)
-PICOLIBC_CROSS_FILE ?= $(ROOT)/build-picolibc-corev-llvm.cross
+PICOLIBC_CROSS_FILE ?= $(BUILD_ROOT)/picolibc-corev-llvm.cross
 
 LLVM_TOOLS := clang lld llvm-ar llvm-ranlib llvm-objcopy llvm-objdump llvm-readobj llvm-nm llvm-size llvm-strip llc llvm-mc FileCheck
 LLVM_CLANG := $(LLVM_BUILD_DIR)/bin/clang
@@ -98,6 +98,7 @@ LLVM_MC := $(LLVM_BUILD_DIR)/bin/llvm-mc
 .PHONY: all build build-llvm sanity sanity-llvm versions \
 	build-llvm-runtimes install-llvm-runtimes install-llvm-runtimes-one install-llvm-multilib-yaml sanity-llvm-runtimes \
 	print-llvm-multilibs $(COREV_SDK_RUNTIME_TARGETS) \
+	check-clang check-llvm check-lld \
 	ci-llvm-toolchain \
 	package-llvm-toolchain package-stage-llvm-toolchain sanity-package-llvm-toolchain \
 	build-picolibc install-picolibc sanity-picolibc \
@@ -105,7 +106,7 @@ LLVM_MC := $(LLVM_BUILD_DIR)/bin/llvm-mc
 
 all: build sanity
 
-build: build-llvm
+build: build-llvm install-llvm-runtimes
 
 build-llvm: $(LLVM_BUILD_DIR)/.corev-configured
 	cmake --build $(LLVM_BUILD_DIR) --target $(LLVM_TOOLS) --parallel $(JOBS)
@@ -136,10 +137,10 @@ $(LLVM_MULTILIB_STAMP_DIR)/$(subst /,_,$(1)).stamp: Makefile build-llvm install-
 	mkdir -p $(LLVM_MULTILIB_STAMP_DIR)
 	$$(MAKE) install-llvm-runtimes-one \
 		COREV_SDK_LLVM_MULTILIB=$(1) \
-		PICOLIBC_CROSS_FILE=$(BUILD_ROOT)/build-picolibc-corev-llvm-$(subst /,_,$(1)).cross \
-		PICOLIBC_BUILD_DIR=$(BUILD_ROOT)/build-picolibc-riscv-$(subst /,_,$(1)) \
+		PICOLIBC_CROSS_FILE=$(BUILD_ROOT)/picolibc-corev-llvm-$(subst /,_,$(1)).cross \
+		PICOLIBC_BUILD_DIR=$(BUILD_ROOT)/picolibc-riscv-$(subst /,_,$(1)) \
 		COREV_SDK_RUNTIME_SYSROOT=$(CLANG_RUNTIMES_ROOT)/$(COREV_SDK_RUNTIME_TRIPLE)/$(1) \
-		LLVM_RUNTIMES_BUILD_DIR=$(BUILD_ROOT)/build-llvm-riscv-runtimes-$(subst /,_,$(1))
+		LLVM_RUNTIMES_BUILD_DIR=$(BUILD_ROOT)/llvm-riscv-runtimes-$(subst /,_,$(1))
 	touch $$@
 
 install-llvm-runtime-$(subst /,_,$(1)): $(LLVM_MULTILIB_STAMP_DIR)/$(subst /,_,$(1)).stamp
@@ -302,16 +303,16 @@ versions: build
 	$(LLVM_CLANG) --version
 	$(LLVM_LLC) --version | sed -n '1,8p'
 
-check-clang:
+check-clang: build-llvm
 	cmake --build $(LLVM_BUILD_DIR) --target check-clang --parallel $(JOBS)
 
-check-llvm:
+check-llvm: build-llvm
 	cmake --build $(LLVM_BUILD_DIR) --target check-llvm --parallel $(JOBS)
 
-check-lld:
+check-lld: build-llvm
 	cmake --build $(LLVM_BUILD_DIR) --target check-lld --parallel $(JOBS)
 
-ci-llvm-toolchain: build-llvm install-llvm-runtimes check-clang check-llvm check-lld
+ci-llvm-toolchain: build check-clang check-llvm check-lld
 
 package-llvm-toolchain: package-stage-llvm-toolchain sanity-package-llvm-toolchain
 	mkdir -p $(dir $(PACKAGE_ARCHIVE))
@@ -413,6 +414,6 @@ clean-llvm-runtimes-build:
 	rm -rf $(LLVM_RUNTIMES_BUILD_DIR)
 	rm -rf $(LLVM_MULTILIB_STAMP_DIR)
 	rm -rf $(CLANG_RUNTIMES_ROOT)
-	rm -rf $(BUILD_ROOT)/build-llvm-riscv-runtimes-*
-	rm -rf $(BUILD_ROOT)/build-picolibc-riscv-*
-	rm -f $(BUILD_ROOT)/build-picolibc-corev-llvm-*.cross
+	rm -rf $(BUILD_ROOT)/llvm-riscv-runtimes-*
+	rm -rf $(BUILD_ROOT)/picolibc-riscv-*
+	rm -f $(BUILD_ROOT)/picolibc-corev-llvm-*.cross
