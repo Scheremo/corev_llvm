@@ -31,6 +31,7 @@ jobs:
       BUILD_ROOT: ${{ github.workspace }}/.ci
       LLVM_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv
       LLVM_RUNTIMES_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv-runtimes
+      LLVM_CMAKE_BUILD_TYPE: Release
       CLANG_RUNTIMES_ROOT: ${{ github.workspace }}/.ci/build-llvm-riscv/lib/clang-runtimes
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 2G
@@ -138,6 +139,7 @@ jobs:
       BUILD_ROOT: ${{ github.workspace }}/.ci
       LLVM_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv
       LLVM_RUNTIMES_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv-runtimes
+      LLVM_CMAKE_BUILD_TYPE: Release
       CLANG_RUNTIMES_ROOT: ${{ github.workspace }}/.ci/build-llvm-riscv/lib/clang-runtimes
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 2G
