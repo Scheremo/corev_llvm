@@ -55,7 +55,8 @@ jobs:
           python3 -m pip install --no-cache-dir \
             cmake \
             meson \
-            ninja
+            ninja \
+            psutil
 
       - name: Check out sources
         uses: actions/checkout@v4
@@ -159,6 +160,7 @@ jobs:
         run: |
           brew update
           brew install ccache cmake meson ninja ripgrep
+          python3 -m pip install --no-cache-dir psutil
 
       - name: Compiler cache
         uses: actions/cache@v4
