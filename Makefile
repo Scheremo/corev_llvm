@@ -18,6 +18,7 @@ PACKAGE_STAGE ?= $(BUILD_ROOT)/package/$(PACKAGE_NAME)
 PACKAGE_ARCHIVE ?= $(BUILD_ROOT)/artifacts/$(PACKAGE_NAME).tar.gz
 
 JOBS ?= 8
+LLVM_PARALLEL_LINK_JOBS ?= 1
 TMP ?= /private/tmp
 
 ABI := ilp32
@@ -95,7 +96,8 @@ $(LLVM_BUILD_DIR)/.corev-configured: Makefile
 		-DLLVM_INCLUDE_TESTS=ON \
 		-DCLANG_INCLUDE_TESTS=ON \
 		-DLLVM_ENABLE_ASSERTIONS=ON \
-		-DLLVM_ENABLE_ZSTD=OFF
+		-DLLVM_ENABLE_ZSTD=OFF \
+		-DLLVM_PARALLEL_LINK_JOBS=$(LLVM_PARALLEL_LINK_JOBS)
 	touch $@
 
 print-llvm-multilibs:
@@ -277,13 +279,13 @@ versions: build
 	$(LLVM_LLC) --version | sed -n '1,8p'
 
 check-clang:
-	cmake --build $(LLVM_BUILD_DIR) --target check-clang -j
+	cmake --build $(LLVM_BUILD_DIR) --target check-clang --parallel $(JOBS)
 
 check-llvm:
-	cmake --build $(LLVM_BUILD_DIR) --target check-llvm -j
+	cmake --build $(LLVM_BUILD_DIR) --target check-llvm --parallel $(JOBS)
 
 check-lld:
-	cmake --build $(LLVM_BUILD_DIR) --target check-lld -j
+	cmake --build $(LLVM_BUILD_DIR) --target check-lld --parallel $(JOBS)
 
 ci-llvm-toolchain: build-llvm install-llvm-runtimes check-clang check-llvm check-lld
 

@@ -64,9 +64,25 @@ jobs:
           meson --version
           ninja --version
 
-      - name: Build and sanity-check LLVM CORE-V toolchain
+      - name: Build LLVM CORE-V compiler
         run: |
-          make ci-llvm-toolchain JOBS="$(nproc)"
+          make build-llvm JOBS="$(nproc)"
+
+      - name: Build and install CORE-V multilib runtimes
+        run: |
+          make install-llvm-runtimes JOBS="$(nproc)"
+
+      - name: Run Clang tests
+        run: |
+          make check-clang JOBS="$(nproc)"
+
+      - name: Run LLVM tests
+        run: |
+          make check-llvm JOBS="$(nproc)"
+
+      - name: Run LLD tests
+        run: |
+          make check-lld JOBS="$(nproc)"
 
       - name: Verify installed CORE-V multilibs
         run: |
@@ -117,9 +133,25 @@ jobs:
           brew update
           brew install cmake meson ninja ripgrep
 
-      - name: Build and sanity-check LLVM CORE-V toolchain
+      - name: Build LLVM CORE-V compiler
         run: |
-          make ci-llvm-toolchain JOBS="$(sysctl -n hw.ncpu)"
+          make build-llvm JOBS="$(sysctl -n hw.ncpu)"
+
+      - name: Build and install CORE-V multilib runtimes
+        run: |
+          make install-llvm-runtimes JOBS="$(sysctl -n hw.ncpu)"
+
+      - name: Run Clang tests
+        run: |
+          make check-clang JOBS="$(sysctl -n hw.ncpu)"
+
+      - name: Run LLVM tests
+        run: |
+          make check-llvm JOBS="$(sysctl -n hw.ncpu)"
+
+      - name: Run LLD tests
+        run: |
+          make check-lld JOBS="$(sysctl -n hw.ncpu)"
 
       - name: Verify installed CORE-V multilibs
         run: |
