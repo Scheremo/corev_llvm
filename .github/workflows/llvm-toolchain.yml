@@ -143,6 +143,7 @@ jobs:
       LLVM_RUNTIMES_BUILD_DIR: ${{ github.workspace }}/.ci/llvm-riscv-runtimes
       LLVM_CMAKE_BUILD_TYPE: Release
       LLVM_LIT_ARGS: "-v --timeout=120 --time-tests --print-result-after=all --no-progress-bar"
+      LLVM_PYTHON_EXECUTABLE: ${{ github.workspace }}/.ci/python-venv/bin/python3
       CLANG_RUNTIMES_ROOT: ${{ github.workspace }}/.ci/llvm-riscv/lib/clang-runtimes
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 2G
@@ -160,7 +161,10 @@ jobs:
         run: |
           brew update
           brew install ccache cmake meson ninja ripgrep
-          python3 -m pip install --no-cache-dir psutil
+          mkdir -p "${BUILD_ROOT}"
+          python3 -m venv "${BUILD_ROOT}/python-venv"
+          "${LLVM_PYTHON_EXECUTABLE}" -m pip install --upgrade pip
+          "${LLVM_PYTHON_EXECUTABLE}" -m pip install --no-cache-dir psutil
 
       - name: Compiler cache
         uses: actions/cache@v4
