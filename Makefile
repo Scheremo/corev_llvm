@@ -19,6 +19,10 @@ PACKAGE_ARCHIVE ?= $(BUILD_ROOT)/artifacts/$(PACKAGE_NAME).tar.gz
 
 JOBS ?= 8
 LLVM_PARALLEL_LINK_JOBS ?= 1
+LLVM_COMPILER_LAUNCHER ?=
+LLVM_COMPILER_LAUNCHER_CMAKE_FLAGS := -DCMAKE_C_COMPILER_LAUNCHER=$(LLVM_COMPILER_LAUNCHER) -DCMAKE_CXX_COMPILER_LAUNCHER=$(LLVM_COMPILER_LAUNCHER)
+comma := ,
+PICOLIBC_COMPILER_LAUNCHER_PREFIX := $(if $(LLVM_COMPILER_LAUNCHER),'$(LLVM_COMPILER_LAUNCHER)'$(comma) ,)
 TMP ?= /private/tmp
 
 ABI := ilp32
@@ -97,7 +101,8 @@ $(LLVM_BUILD_DIR)/.corev-configured: Makefile
 		-DCLANG_INCLUDE_TESTS=ON \
 		-DLLVM_ENABLE_ASSERTIONS=ON \
 		-DLLVM_ENABLE_ZSTD=OFF \
-		-DLLVM_PARALLEL_LINK_JOBS=$(LLVM_PARALLEL_LINK_JOBS)
+		-DLLVM_PARALLEL_LINK_JOBS=$(LLVM_PARALLEL_LINK_JOBS) \
+		$(LLVM_COMPILER_LAUNCHER_CMAKE_FLAGS)
 	touch $@
 
 print-llvm-multilibs:
@@ -170,9 +175,9 @@ $(PICOLIBC_CROSS_FILE): Makefile build-llvm
 	mkdir -p $(PICOLIBC_BUILD_DIR)
 	printf '%s\n' \
 		'[binaries]' \
-		"c = ['$(LLVM_CLANG)', '--target=$(COREV_SDK_TRIPLE)', '-march=$(COREV_SDK_ARCH)', '-mabi=$(COREV_SDK_ABI)', '-nostdlib', '-ffreestanding']" \
+		"c = [$(PICOLIBC_COMPILER_LAUNCHER_PREFIX)'$(LLVM_CLANG)', '--target=$(COREV_SDK_TRIPLE)', '-march=$(COREV_SDK_ARCH)', '-mabi=$(COREV_SDK_ABI)', '-nostdlib', '-ffreestanding']" \
 		"ar = '$(LLVM_BUILD_DIR)/bin/llvm-ar'" \
-		"as = ['$(LLVM_CLANG)', '--target=$(COREV_SDK_TRIPLE)', '-march=$(COREV_SDK_ARCH)', '-mabi=$(COREV_SDK_ABI)']" \
+		"as = [$(PICOLIBC_COMPILER_LAUNCHER_PREFIX)'$(LLVM_CLANG)', '--target=$(COREV_SDK_TRIPLE)', '-march=$(COREV_SDK_ARCH)', '-mabi=$(COREV_SDK_ABI)']" \
 		"ld = '$(LLVM_BUILD_DIR)/bin/ld.lld'" \
 		"c_ld = '$(LLVM_BUILD_DIR)/bin/ld.lld'" \
 		"nm = '$(LLVM_BUILD_DIR)/bin/llvm-nm'" \
@@ -223,6 +228,7 @@ $(LLVM_RUNTIMES_BUILD_DIR)/.corev-configured: Makefile build-llvm install-picoli
 		-DCMAKE_C_COMPILER=$(LLVM_CLANG) \
 		-DCMAKE_CXX_COMPILER=$(LLVM_CLANGXX) \
 		-DCMAKE_ASM_COMPILER=$(LLVM_CLANG) \
+		$(LLVM_COMPILER_LAUNCHER_CMAKE_FLAGS) \
 		-DCMAKE_AR=$(LLVM_BUILD_DIR)/bin/llvm-ar \
 		-DCMAKE_RANLIB=$(LLVM_BUILD_DIR)/bin/llvm-ranlib \
 		-DCMAKE_OBJCOPY=$(LLVM_BUILD_DIR)/bin/llvm-objcopy \

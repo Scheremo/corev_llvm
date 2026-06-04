@@ -32,6 +32,9 @@ jobs:
       LLVM_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv
       LLVM_RUNTIMES_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv-runtimes
       CLANG_RUNTIMES_ROOT: ${{ github.workspace }}/.ci/build-llvm-riscv/lib/clang-runtimes
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPRESS: "true"
       TMP: /tmp
 
     steps:
@@ -41,6 +44,7 @@ jobs:
           apt-get install -y --no-install-recommends \
             build-essential \
             ca-certificates \
+            ccache \
             git \
             python3 \
             python3-pip \
@@ -57,20 +61,30 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      - name: Compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-linux-${{ runner.arch }}-${{ hashFiles('Makefile', '.github/workflows/llvm-toolchain.yml') }}
+          restore-keys: |
+            ccache-linux-${{ runner.arch }}-
+
       - name: Show Linux package baseline
         run: |
           ldd --version | head -n 1
           cmake --version | head -n 1
           meson --version
           ninja --version
+          ccache --version | head -n 1
+          ccache --zero-stats
 
       - name: Build LLVM CORE-V compiler
         run: |
-          make build-llvm JOBS="$(nproc)"
+          make build-llvm JOBS="$(nproc)" LLVM_COMPILER_LAUNCHER=ccache
 
       - name: Build and install CORE-V multilib runtimes
         run: |
-          make install-llvm-runtimes JOBS="$(nproc)"
+          make install-llvm-runtimes JOBS="$(nproc)" LLVM_COMPILER_LAUNCHER=ccache
 
       - name: Run Clang tests
         run: |
@@ -100,7 +114,13 @@ jobs:
         run: |
           make package-llvm-toolchain \
             PACKAGE_ARCHIVE="${BUILD_ROOT}/artifacts/llvm-corev-toolchain-linux.tar.gz" \
-            JOBS="$(nproc)"
+            JOBS="$(nproc)" \
+            LLVM_COMPILER_LAUNCHER=ccache
+
+      - name: Show compiler cache statistics
+        if: always()
+        run: |
+          ccache --show-stats
 
       - name: Upload LLVM CORE-V toolchain
         uses: actions/upload-artifact@v4
@@ -119,6 +139,9 @@ jobs:
       LLVM_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv
       LLVM_RUNTIMES_BUILD_DIR: ${{ github.workspace }}/.ci/build-llvm-riscv-runtimes
       CLANG_RUNTIMES_ROOT: ${{ github.workspace }}/.ci/build-llvm-riscv/lib/clang-runtimes
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPRESS: "true"
       TMP: /tmp
 
     steps:
@@ -131,15 +154,31 @@ jobs:
       - name: Install build dependencies
         run: |
           brew update
-          brew install cmake meson ninja ripgrep
+          brew install ccache cmake meson ninja ripgrep
+
+      - name: Compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-macos-${{ runner.arch }}-${{ hashFiles('Makefile', '.github/workflows/llvm-toolchain.yml') }}
+          restore-keys: |
+            ccache-macos-${{ runner.arch }}-
+
+      - name: Show macOS package baseline
+        run: |
+          cmake --version | head -n 1
+          meson --version
+          ninja --version
+          ccache --version | head -n 1
+          ccache --zero-stats
 
       - name: Build LLVM CORE-V compiler
         run: |
-          make build-llvm JOBS="$(sysctl -n hw.ncpu)"
+          make build-llvm JOBS="$(sysctl -n hw.ncpu)" LLVM_COMPILER_LAUNCHER=ccache
 
       - name: Build and install CORE-V multilib runtimes
         run: |
-          make install-llvm-runtimes JOBS="$(sysctl -n hw.ncpu)"
+          make install-llvm-runtimes JOBS="$(sysctl -n hw.ncpu)" LLVM_COMPILER_LAUNCHER=ccache
 
       - name: Run Clang tests
         run: |
@@ -169,7 +208,13 @@ jobs:
         run: |
           make package-llvm-toolchain \
             PACKAGE_ARCHIVE="${BUILD_ROOT}/artifacts/llvm-corev-toolchain-macos.tar.gz" \
-            JOBS="$(sysctl -n hw.ncpu)"
+            JOBS="$(sysctl -n hw.ncpu)" \
+            LLVM_COMPILER_LAUNCHER=ccache
+
+      - name: Show compiler cache statistics
+        if: always()
+        run: |
+          ccache --show-stats
 
       - name: Upload LLVM CORE-V toolchain
         uses: actions/upload-artifact@v4
