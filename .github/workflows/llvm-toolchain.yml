@@ -32,7 +32,7 @@ jobs:
       LLVM_BUILD_DIR: ${{ github.workspace }}/.ci/llvm-riscv
       LLVM_RUNTIMES_BUILD_DIR: ${{ github.workspace }}/.ci/llvm-riscv-runtimes
       LLVM_CMAKE_BUILD_TYPE: Release
-      LLVM_LIT_ARGS: "-v --timeout=120 --time-tests --print-result-after=all --no-progress-bar"
+      LLVM_LIT_ARGS: "-v --timeout=120 --time-tests --print-result-after=failed --no-progress-bar"
       CLANG_RUNTIMES_ROOT: ${{ github.workspace }}/.ci/llvm-riscv/lib/clang-runtimes
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 2G
@@ -142,7 +142,7 @@ jobs:
       LLVM_BUILD_DIR: ${{ github.workspace }}/.ci/llvm-riscv
       LLVM_RUNTIMES_BUILD_DIR: ${{ github.workspace }}/.ci/llvm-riscv-runtimes
       LLVM_CMAKE_BUILD_TYPE: Release
-      LLVM_LIT_ARGS: "-v --timeout=120 --time-tests --print-result-after=all --no-progress-bar"
+      LLVM_LIT_ARGS: "-v --timeout=120 --time-tests --print-result-after=failed --no-progress-bar"
       LLVM_PYTHON_EXECUTABLE: ${{ github.workspace }}/.ci/python-venv/bin/python3
       CLANG_RUNTIMES_ROOT: ${{ github.workspace }}/.ci/llvm-riscv/lib/clang-runtimes
       CCACHE_DIR: ${{ github.workspace }}/.ccache
