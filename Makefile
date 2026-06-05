@@ -16,6 +16,18 @@ LLVM_CMAKE_BUILD_TYPE ?= RelWithDebInfo
 LLVM_TARGETS_TO_BUILD ?= host;RISCV
 LLVM_LIT_ARGS ?= -sv
 LLVM_PYTHON_EXECUTABLE ?=
+LLVM_RISCV_CHECK_TARGETS ?= \
+	check-llvm-codegen-riscv \
+	check-llvm-mc-riscv \
+	check-llvm-mc-disassembler-riscv \
+	check-llvm-tools-llvm-mca-riscv \
+	check-llvm-tools-llvm-objdump-elf-riscv \
+	check-llvm-tools-llvm-readobj-elf-riscv
+CLANG_RISCV_CHECK_TARGETS ?= \
+	check-clang-codegen-riscv \
+	check-clang-cir-codegenbuiltins-riscv \
+	check-clang-debuginfo-riscv \
+	check-clang-driver-print-enabled-extensions
 PACKAGE_NAME ?= llvm-corev-toolchain
 PACKAGE_STAGE ?= $(BUILD_ROOT)/package/$(PACKAGE_NAME)
 PACKAGE_ARCHIVE ?= $(BUILD_ROOT)/artifacts/$(PACKAGE_NAME).tar.gz
@@ -101,7 +113,7 @@ LLVM_MC := $(LLVM_BUILD_DIR)/bin/llvm-mc
 .PHONY: all build build-llvm sanity sanity-llvm versions \
 	build-llvm-runtimes install-llvm-runtimes install-llvm-runtimes-one install-llvm-multilib-yaml sanity-llvm-runtimes \
 	print-llvm-multilibs $(COREV_SDK_RUNTIME_TARGETS) \
-	check-clang check-llvm check-lld \
+	check-clang check-clang-riscv check-llvm check-llvm-riscv check-lld \
 	ci-llvm-toolchain \
 	package-llvm-toolchain package-stage-llvm-toolchain sanity-package-llvm-toolchain \
 	build-picolibc install-picolibc sanity-picolibc \
@@ -311,13 +323,19 @@ versions: build
 check-clang: build-llvm
 	cmake --build $(LLVM_BUILD_DIR) --target check-clang --parallel $(JOBS)
 
+check-clang-riscv: build-llvm
+	cmake --build $(LLVM_BUILD_DIR) --target $(CLANG_RISCV_CHECK_TARGETS) --parallel $(JOBS)
+
 check-llvm: build-llvm
 	cmake --build $(LLVM_BUILD_DIR) --target check-llvm --parallel $(JOBS)
+
+check-llvm-riscv: build-llvm
+	cmake --build $(LLVM_BUILD_DIR) --target $(LLVM_RISCV_CHECK_TARGETS) --parallel $(JOBS)
 
 check-lld: build-llvm
 	cmake --build $(LLVM_BUILD_DIR) --target check-lld --parallel $(JOBS)
 
-ci-llvm-toolchain: build check-clang check-llvm check-lld
+ci-llvm-toolchain: build check-clang-riscv check-llvm-riscv check-lld
 
 package-llvm-toolchain: package-stage-llvm-toolchain sanity-package-llvm-toolchain
 	mkdir -p $(dir $(PACKAGE_ARCHIVE))

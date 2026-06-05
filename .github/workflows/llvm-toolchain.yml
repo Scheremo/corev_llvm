@@ -89,13 +89,13 @@ jobs:
         run: |
           make install-llvm-runtimes JOBS="$(nproc)" LLVM_COMPILER_LAUNCHER=ccache
 
-      - name: Run Clang tests
+      - name: Run Clang RISCV tests
         run: |
-          make check-clang JOBS="$(nproc)"
+          make check-clang-riscv JOBS="$(nproc)"
 
-      - name: Run LLVM tests
+      - name: Run LLVM RISCV tests
         run: |
-          make check-llvm JOBS="$(nproc)"
+          make check-llvm-riscv JOBS="$(nproc)"
 
       - name: Run LLD tests
         run: |
@@ -190,13 +190,13 @@ jobs:
         run: |
           make install-llvm-runtimes JOBS="$(sysctl -n hw.ncpu)" LLVM_COMPILER_LAUNCHER=ccache
 
-      - name: Run Clang tests
+      - name: Run Clang RISCV tests
         run: |
-          make check-clang JOBS="$(sysctl -n hw.ncpu)"
+          make check-clang-riscv JOBS="$(sysctl -n hw.ncpu)"
 
-      - name: Run LLVM tests
+      - name: Run LLVM RISCV tests
         run: |
-          make check-llvm JOBS="$(sysctl -n hw.ncpu)"
+          make check-llvm-riscv JOBS="$(sysctl -n hw.ncpu)"
 
       - name: Run LLD tests
         run: |
