@@ -46,6 +46,8 @@ COREV_SDK_GENERIC_MULTILIB_ALIASES ?= \
 COREV_SDK_COREV_MULTILIBS ?= \
 	rv32im_xcvalu_xcvbi_xcvbitmanip_xcvmac_xcvmem_xcvsimd/ilp32 \
 	rv32imc_xcvalu_xcvbi_xcvbitmanip_xcvmac_xcvmem_xcvsimd/ilp32 \
+	rv32imac_zicsr_zifencei_xcvalu_xcvbi_xcvbitmanip_xcvmac_xcvmem_xcvsimd/ilp32 \
+	rv32imafc_zicsr_zifencei_xcvalu_xcvbi_xcvbitmanip_xcvmac_xcvmem_xcvsimd/ilp32f \
 	rv32imf_zicsr_xcvalu_xcvbi_xcvbitmanip_xcvmac_xcvmem_xcvsimd/ilp32f \
 	rv32imfc_zicsr_xcvalu_xcvbi_xcvbitmanip_xcvmac_xcvmem_xcvsimd/ilp32f \
 	rv32im_zicsr_zfinx_xcvalu_xcvbi_xcvbitmanip_xcvmac_xcvmem_xcvsimd/ilp32 \
