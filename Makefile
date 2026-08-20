@@ -169,18 +169,19 @@ $(foreach multilib,$(COREV_SDK_MULTILIBS),$(eval $(call COREV_LLVM_RUNTIME_TARGE
 
 install-llvm-runtimes-one: build-llvm-runtimes
 	cmake --build $(LLVM_RUNTIMES_BUILD_DIR) --target install --parallel $(JOBS)
-	mkdir -p $(LLVM_BUILD_DIR)/lib/clang/$(LLVM_VERSION_MAJOR)/lib/$(COREV_SDK_CLANG_LIB_TRIPLE)
-	mkdir -p $(LLVM_BUILD_DIR)/lib/clang/$(LLVM_VERSION_MAJOR)/lib/$(COREV_SDK_RUNTIME_CLANG_LIB_TRIPLE)
-	cp $(LLVM_BUILD_DIR)/lib/generic/libclang_rt.builtins-riscv32.a \
-		$(LLVM_BUILD_DIR)/lib/clang/$(LLVM_VERSION_MAJOR)/lib/$(COREV_SDK_CLANG_LIB_TRIPLE)/libclang_rt.builtins.a
-	cp $(LLVM_BUILD_DIR)/lib/generic/libclang_rt.builtins-riscv32.a \
-		$(LLVM_BUILD_DIR)/lib/clang/$(LLVM_VERSION_MAJOR)/lib/$(COREV_SDK_RUNTIME_CLANG_LIB_TRIPLE)/libclang_rt.builtins.a
 	mkdir -p $(COREV_SDK_RUNTIME_SYSROOT)/lib $(COREV_SDK_RUNTIME_SYSROOT)/include
 	cp $(LLVM_BUILD_DIR)/lib/libc++.a \
 		$(LLVM_BUILD_DIR)/lib/libc++abi.a \
 		$(LLVM_BUILD_DIR)/lib/libunwind.a \
-		$(LLVM_BUILD_DIR)/lib/clang/$(LLVM_VERSION_MAJOR)/lib/$(COREV_SDK_CLANG_LIB_TRIPLE)/libclang_rt.builtins.a \
 		$(COREV_SDK_RUNTIME_SYSROOT)/lib/
+	# Clang's compiler-rt lookup uses one fixed resource-directory path and is
+	# therefore not multilib-aware. The archive here belongs to the multilib
+	# currently being installed; expose it under libgcc.a so the linker resolves
+	# it through Clang's already multilib-aware library search path.
+	cp $(LLVM_BUILD_DIR)/lib/generic/libclang_rt.builtins-riscv32.a \
+		$(COREV_SDK_RUNTIME_SYSROOT)/lib/libclang_rt.builtins.a
+	cp $(LLVM_BUILD_DIR)/lib/generic/libclang_rt.builtins-riscv32.a \
+		$(COREV_SDK_RUNTIME_SYSROOT)/lib/libgcc.a
 	rm -rf $(COREV_SDK_RUNTIME_SYSROOT)/include/c++
 	$(MAKE) install-llvm-multilib-yaml
 
@@ -348,10 +349,6 @@ package-stage-llvm-toolchain: install-llvm-runtimes
 	rm -rf $(PACKAGE_STAGE)
 	mkdir -p $(PACKAGE_STAGE)/bin $(PACKAGE_STAGE)/include $(PACKAGE_STAGE)/lib $(PACKAGE_STAGE)/share/cmake/corev-llvm
 	for tool in \
-		clang:clang \
-		clang++:clang++ \
-		cc:clang \
-		c++:clang++ \
 		ld:ld.lld \
 		ld.lld:ld.lld \
 		lld:lld \
@@ -369,6 +366,20 @@ package-stage-llvm-toolchain: install-llvm-runtimes
 		src=$${tool##*:}; \
 		cp -L $(LLVM_BUILD_DIR)/bin/$$src $(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-$$dst; \
 		chmod +x $(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-$$dst; \
+	done
+	cp -L $(LLVM_BUILD_DIR)/bin/clang $(PACKAGE_STAGE)/bin/.real-$(COREV_SDK_TRIPLE)-clang
+	cp -L $(LLVM_BUILD_DIR)/bin/clang++ $(PACKAGE_STAGE)/bin/.real-$(COREV_SDK_TRIPLE)-clang++
+	for alias in clang cc; do \
+		printf '%s\n' '#!/bin/sh' \
+			'exec "$$(dirname "$$0")/.real-$(COREV_SDK_TRIPLE)-clang" -rtlib=libgcc "$$@"' \
+			> $(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-$$alias; \
+		chmod +x $(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-$$alias; \
+	done
+	for alias in clang++ c++; do \
+		printf '%s\n' '#!/bin/sh' \
+			'exec "$$(dirname "$$0")/.real-$(COREV_SDK_TRIPLE)-clang++" -rtlib=libgcc "$$@"' \
+			> $(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-$$alias; \
+		chmod +x $(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-$$alias; \
 	done
 	cp -R $(LLVM_BUILD_DIR)/lib/clang $(PACKAGE_STAGE)/lib/clang
 	cp -R $(CLANG_RUNTIMES_ROOT) $(PACKAGE_STAGE)/lib/clang-runtimes
@@ -403,7 +414,7 @@ package-stage-llvm-toolchain: install-llvm-runtimes
 		'set(CMAKE_C_FLAGS_INIT "-march=$${COREV_MARCH} -mabi=$${COREV_MABI}")' \
 		'set(CMAKE_CXX_FLAGS_INIT "-march=$${COREV_MARCH} -mabi=$${COREV_MABI}")' \
 		'set(CMAKE_ASM_FLAGS_INIT "-march=$${COREV_MARCH} -mabi=$${COREV_MABI}")' \
-		'set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld --rtlib=compiler-rt")' \
+		'set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld")' \
 		'' \
 		'set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)' \
 		> $(PACKAGE_STAGE)/share/cmake/corev-llvm/$(COREV_SDK_TRIPLE).cmake
@@ -414,9 +425,9 @@ sanity-package-llvm-toolchain: package-stage-llvm-toolchain
 	printf '%s\n' \
 		'cmake_minimum_required(VERSION 3.20)' \
 		'project(corev_package_smoke C CXX ASM)' \
-		'add_library(corev_package_smoke STATIC smoke.c smoke.cc smoke.S)' \
+		'add_executable(corev_package_smoke smoke.c smoke.cc smoke.S)' \
 		> $(BUILD_ROOT)/package-smoke/src/CMakeLists.txt
-	printf '%s\n' 'int smoke_c(void) { return 0; }' > $(BUILD_ROOT)/package-smoke/src/smoke.c
+	printf '%s\n' 'int smoke_c(void) { return 0; }' 'int main(void) { return smoke_c(); }' > $(BUILD_ROOT)/package-smoke/src/smoke.c
 	printf '%s\n' 'int smoke_cxx() { return 0; }' > $(BUILD_ROOT)/package-smoke/src/smoke.cc
 	printf '%s\n' '.text' '.globl smoke_asm' 'smoke_asm:' '  ret' > $(BUILD_ROOT)/package-smoke/src/smoke.S
 	cmake -S $(BUILD_ROOT)/package-smoke/src -B $(BUILD_ROOT)/package-smoke/build \
