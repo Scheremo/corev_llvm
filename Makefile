@@ -371,12 +371,22 @@ package-stage-llvm-toolchain: install-llvm-runtimes
 	cp -L $(LLVM_BUILD_DIR)/bin/clang++ $(PACKAGE_STAGE)/bin/.real-$(COREV_SDK_TRIPLE)-clang++
 	for alias in clang cc; do \
 		printf '%s\n' '#!/bin/sh' \
+			'for arg in "$$@"; do' \
+			'  case "$$arg" in' \
+			'    -c|-S|-E|-M|-MM|-fsyntax-only|-print*|-dump*|--version|-v|-###) exec "$$(dirname "$$0")/.real-$(COREV_SDK_TRIPLE)-clang" "$$@" ;;' \
+			'  esac' \
+			'done' \
 			'exec "$$(dirname "$$0")/.real-$(COREV_SDK_TRIPLE)-clang" -rtlib=libgcc "$$@"' \
 			> $(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-$$alias; \
 		chmod +x $(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-$$alias; \
 	done
 	for alias in clang++ c++; do \
 		printf '%s\n' '#!/bin/sh' \
+			'for arg in "$$@"; do' \
+			'  case "$$arg" in' \
+			'    -c|-S|-E|-M|-MM|-fsyntax-only|-print*|-dump*|--version|-v|-###) exec "$$(dirname "$$0")/.real-$(COREV_SDK_TRIPLE)-clang++" "$$@" ;;' \
+			'  esac' \
+			'done' \
 			'exec "$$(dirname "$$0")/.real-$(COREV_SDK_TRIPLE)-clang++" -rtlib=libgcc "$$@"' \
 			> $(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-$$alias; \
 		chmod +x $(PACKAGE_STAGE)/bin/$(COREV_SDK_TRIPLE)-$$alias; \
@@ -414,7 +424,7 @@ package-stage-llvm-toolchain: install-llvm-runtimes
 		'set(CMAKE_C_FLAGS_INIT "-march=$${COREV_MARCH} -mabi=$${COREV_MABI}")' \
 		'set(CMAKE_CXX_FLAGS_INIT "-march=$${COREV_MARCH} -mabi=$${COREV_MABI}")' \
 		'set(CMAKE_ASM_FLAGS_INIT "-march=$${COREV_MARCH} -mabi=$${COREV_MABI}")' \
-		'set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld")' \
+		'set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld -nostartfiles")' \
 		'' \
 		'set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)' \
 		> $(PACKAGE_STAGE)/share/cmake/corev-llvm/$(COREV_SDK_TRIPLE).cmake
